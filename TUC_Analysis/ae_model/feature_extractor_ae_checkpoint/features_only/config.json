@@ -1,0 +1,36 @@
+{
+    "grid_cells": false,
+    "data_csv": "../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv",
+    "feature_model_path": "./attention_model/SAM_weights/",
+    "checkpoint_base": "./ae_model/feature_extractor_ae_checkpoint/",
+    "batch_size": 512,
+    "num_workers": 12,
+    "seed": null,
+    "n_hidden": 200,
+    "learning_rate": 0.0001,
+    "min_learning_rate": 1e-07,
+    "alpha": 100000.0,
+    "c_factor": 1000.0,
+    "num_epochs": 1000,
+    "patience": 10,
+    "beta": 1.0,
+    "arena_size": 1.2,
+    "grid_res": 200,
+    "cells_per_module": 4,
+    "scales": [
+        0.1,
+        0.2,
+        0.3,
+        0.6,
+        0.8,
+        1.0
+    ],
+    "orientations": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5
+    ]
+}

@@ -1,0 +1,15 @@
+install/
+log/
+build/
+data/
+*.d
+*.o
+*.pyc
+*.Identifier
+Datasets/
+Models/
+Plots/
+Denis/
+*.png
+__pycache__/
+.vscode/
