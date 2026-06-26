@@ -7,8 +7,6 @@
 - What should be done with the grid-cell auxiliary? Should we keep it or remove it? 
 - Why the change from a classical Deep Net to Spiking Neural Networks? 
 
-
-
 ---
 
 ## Repository layout
@@ -20,8 +18,7 @@
 ├── utils.py                       # dataloader, dataset, seed, timing helpers
 │
 ├── ae_model/
-│   ├── cnn_hippocampal_ae.py      # Conv autoencoder with optional aux head
-│   ├── dense_hippocampal_ae.py    # Dense variant (alternative architecture not used yet)
+│   ├── dense_hippocampal_ae.py    # Dense autoencoder that pools the feature maps with optional aux head
 │   ├── plotting.py                # Ratemap computation and place-field analysis from Denis
 │   └── feature_extractor_ae_checkpoint/   # Saved checkpoints of the AE training
 │
@@ -34,9 +31,9 @@
 │   ├── encoder.py                 # GridCellEncoder deterministic Fourier grid codes
 │   └── utils.py                   # Grid-cell helper functions
 │
-├── attention_notebook.ipynb       # Feature-extractor exploration
-├── gridcell_notebook.ipynb        # Grid-cell code visualisation
-└── vit_notebook.ipynb             # End-to-end train + eval (mirrors main.py workflow)
+├── attention_notebook.ipynb       # Feature-extractor AE only analysis (no grid-cell auxiliary)
+├── gridcell_notebook.ipynb        # Grid-cell auxiliary AE analysis (with grid-cell auxiliary)
+└── vit_notebook.ipynb             # ViT feature analysis (SOTA comparison)
 ```
 
 ---
