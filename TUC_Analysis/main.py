@@ -1,9 +1,13 @@
 """
-Training script for the hippocampal Conv autoencoder on Webots frames.
+Training script for the hippocampal pool+MLP autoencoder on Webots frames.
 
-With --grid-cells the autoencoder receives a grid-cell code of the agent's
-position as an auxiliary target and reconstructs both the image features and
-the grid code.
+CNN feature maps are spatially average-pooled to `pool_output_size`, flattened,
+and reconstructed by an MLP autoencoder. The reconstruction target is the
+POOLED feature vector (not the raw feature map).
+
+With --grid-cells the autoencoder additionally receives a grid-cell code of the
+agent's position as an auxiliary target and reconstructs both the pooled image
+features and the grid code.
 """
 
 import argparse
@@ -14,14 +18,14 @@ from torchvision.transforms import v2
 import numpy as np
 
 from grid_cells.encoder import GridCellEncoder, GridModule, save_grid_encoder, load_grid_encoder
-from ae_model.cnn_hippocampal_ae import Conv_AE
+from ae_model.dense_hippocampal_ae import PooledDenseAE, load_ae_model
 from utils import build_dataloader, WebotsFrameDataset, set_seed, get_parameters, timer
 from attention_model.conv_encoder import ConvEncoder
 from training_functions import train, train_aux, get_eval_metrics
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Train a hippocampal autoencoder on Webots frames, with optional grid-cell auxiliary target.")
+    p = argparse.ArgumentParser(description="Train a pool+MLP hippocampal autoencoder on Webots frames, with optional grid-cell auxiliary target.")
 
     p.add_argument("--grid-cells", action="store_true",
                    help="Use the grid-cell auxiliary target (sets d_aux and beta).")
@@ -29,16 +33,31 @@ def parse_args():
     p.add_argument("--data-csv", default="../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv")
     p.add_argument("--feature-model-path", default="./attention_model/SAM_weights/")
     p.add_argument("--checkpoint-base", default="./ae_model/feature_extractor_ae_checkpoint/",
-                   help="Base dir; a mode subdir is appended.")
+                   help="Base dir; a mode + pooling subdir is appended.")
 
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--num_workers", type=int, default=12)
     p.add_argument("--seed", type=int, default=None, help="Random seed; None for nondeterministic.")
 
+    # --- autoencoder architecture ---
     p.add_argument("--n_hidden", type=int, default=200)
+    p.add_argument("--in-channels", type=int, default=512,
+                   help="Channel count of the feature-extractor output.")
+    p.add_argument("--pool-output-size", type=int, nargs=2, default=[1, 1],
+                   metavar=("H", "W"),
+                   help="Adaptive-avg-pool target spatial size. (1 1) = global pool; "
+                        "(3 4) keeps coarse spatial layout. obs_dim = in_channels * H * W.")
+    p.add_argument("--hidden-dims", type=int, nargs="+", default=[256, 128],
+                   help="MLP encoder widths; decoder mirrors these reversed.")
+    p.add_argument("--linear-latent", action="store_true",
+                   help="Use a linear (signed) bottleneck instead of the default ReLU "
+                        "(non-negative, place-cell-like) latent.")
+
     p.add_argument("--learning_rate", type=float, default=1e-4)
     p.add_argument("--min_learning_rate", type=float, default=1e-7)
     p.add_argument("--alpha", type=float, default=1e5)
+    p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--c_factor", type=float, default=1000.0)
     p.add_argument("--num_epochs", type=int, default=1000)
     p.add_argument("--patience", type=int, default=10)
@@ -84,21 +103,40 @@ def build_grid_encoder(args):
     return GridCellEncoder(modules)
 
 
+def build_ae(args, d_aux):
+    """Single construction path so feature-only and grid modes can't drift apart."""
+    return PooledDenseAE(
+        n_hidden=args.n_hidden,
+        in_channels=args.in_channels,
+        pool_output_size=tuple(args.pool_output_size),
+        hidden_dims=args.hidden_dims,
+        latent_activation=(None if args.linear_latent else torch.nn.ReLU),
+        last_layer_activation=torch.nn.Sigmoid(),  # pooled target stays in [0, 1]
+        d_aux=d_aux,
+        dropout=args.dropout,
+    )
+
+
 def main():
     args = parse_args()
 
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    mode_tag = "grid" if args.grid_cells else "features_only"
+    # pool size is part of the tag so different pooling configs don't overwrite
+    # each other's best_model.pt. Drop pool_tag to restore the old flat layout.
+    pool_tag = f"pool{args.pool_output_size[0]}x{args.pool_output_size[1]}"
+    mode_tag = ("grid" if args.grid_cells else "features_only") + f"_{pool_tag}"
     checkpoint_dir = os.path.join(args.checkpoint_base, mode_tag)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     print(f"PyTorch version: {torch.__version__}")
     print(f"Numpy version: {np.__version__}")
     print(f"Mode: {mode_tag} | device: {device}")
+    print(f"Pool: {tuple(args.pool_output_size)} -> obs_dim = "
+          f"{args.in_channels * args.pool_output_size[0] * args.pool_output_size[1]}")
     print(f"Checkpoints -> {checkpoint_dir}")
-    
+
     # generate config json for this run
     config = vars(args)
     config_path = os.path.join(checkpoint_dir, "config.json")
@@ -127,22 +165,18 @@ def main():
     # autoencoder + grid-cell encoder (None when features only)
     if args.grid_cells:
         grid_cell_encoder = build_grid_encoder(args)
-        ae_model = Conv_AE(
-            n_hidden=args.n_hidden,
-            last_layer_activation=torch.nn.Sigmoid(),
-            d_aux=grid_cell_encoder.n_cells,
-        )
+        ae_model = build_ae(args, d_aux=grid_cell_encoder.n_cells)
         beta = args.beta
         save_grid_encoder(grid_cell_encoder, os.path.join(checkpoint_dir, "grid_encoder.pt"))
     else:
         grid_cell_encoder = None
-        ae_model = Conv_AE(n_hidden=args.n_hidden, last_layer_activation=torch.nn.Sigmoid(), d_aux=None)
+        ae_model = build_ae(args, d_aux=None)
         beta = 0.0
-    
+
     print(f"Number of parameters: {get_parameters(ae_model)} M")
 
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(ae_model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(ae_model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.num_epochs, eta_min=args.min_learning_rate
     )
@@ -196,9 +230,8 @@ def main():
 
     accuracy = np.mean(r2_features)
     print(f"Embeddings shape: {np.asarray(embeddings).shape}")
-    print(f"Accuracy (feature reconstruction): {accuracy}")
+    print(f"Accuracy (pooled-feature reconstruction R2): {accuracy}")
 
 
 if __name__ == "__main__":
     main()
-    

@@ -13,3 +13,4 @@ Denis/
 *.png
 __pycache__/
 .vscode/
+sketch*

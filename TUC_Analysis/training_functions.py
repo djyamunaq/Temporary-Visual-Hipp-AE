@@ -174,7 +174,7 @@ def get_eval_metrics(
             features = feature_extractor(image)
             rec_features, rec_grid, h = ae_model(features, aux=grid_cell_input)
 
-            features_np     = features.cpu().numpy()
+            features_np     = ae_model.pool_flatten(features).cpu().numpy()
             rec_features_np = rec_features.cpu().numpy()
 
             # R2 per sample: flatten (C, H, W) - (D,) per sample, then average over batch

@@ -7,6 +7,16 @@
     "num_workers": 12,
     "seed": null,
     "n_hidden": 200,
+    "in_channels": 512,
+    "pool_output_size": [
+        1,
+        1
+    ],
+    "hidden_dims": [
+        256,
+        128
+    ],
+    "linear_latent": false,
     "learning_rate": 0.0001,
     "min_learning_rate": 1e-07,
     "alpha": 100000.0,
