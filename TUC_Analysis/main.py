@@ -16,6 +16,7 @@ import os
 import torch
 from torchvision.transforms import v2
 import numpy as np
+import json
 
 from grid_cells.encoder import GridCellEncoder, GridModule, save_grid_encoder, load_grid_encoder
 from ae_model.dense_hippocampal_ae import PooledDenseAE, load_ae_model
@@ -47,7 +48,7 @@ def parse_args():
                    metavar=("H", "W"),
                    help="Adaptive-avg-pool target spatial size. (1 1) = global pool; "
                         "(3 4) keeps coarse spatial layout. obs_dim = in_channels * H * W.")
-    p.add_argument("--hidden-dims", type=int, nargs="+", default=[256, 128],
+    p.add_argument("--hidden-dims", type=int, nargs="+", default=[512,],
                    help="MLP encoder widths; decoder mirrors these reversed.")
     p.add_argument("--linear-latent", action="store_true",
                    help="Use a linear (signed) bottleneck instead of the default ReLU "
@@ -56,7 +57,7 @@ def parse_args():
     p.add_argument("--learning_rate", type=float, default=1e-4)
     p.add_argument("--min_learning_rate", type=float, default=1e-7)
     p.add_argument("--alpha", type=float, default=1e5)
-    p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--c_factor", type=float, default=1000.0)
     p.add_argument("--num_epochs", type=int, default=1000)
@@ -103,6 +104,11 @@ def build_grid_encoder(args):
     return GridCellEncoder(modules)
 
 
+def load_run_config(checkpoint_dir):
+    with open(os.path.join(checkpoint_dir, "config.json")) as f:
+        return argparse.Namespace(**json.load(f))   # vars(args) round-trips cleanly
+
+
 def build_ae(args, d_aux):
     """Single construction path so feature-only and grid modes can't drift apart."""
     return PooledDenseAE(
@@ -110,11 +116,25 @@ def build_ae(args, d_aux):
         in_channels=args.in_channels,
         pool_output_size=tuple(args.pool_output_size),
         hidden_dims=args.hidden_dims,
-        latent_activation=(None if args.linear_latent else torch.nn.ReLU),
+        latent_activation=torch.nn.ReLU(),
         last_layer_activation=torch.nn.Sigmoid(),  # pooled target stays in [0, 1]
         d_aux=d_aux,
         dropout=args.dropout,
     )
+    
+
+def build_model_from_config(checkpoint_dir, device, weights_name="best_model.pt"):
+    args = load_run_config(checkpoint_dir)
+
+    if args.grid_cells:
+        grid_cell_encoder = load_grid_encoder(os.path.join(checkpoint_dir, "grid_encoder.pt"))
+        d_aux = grid_cell_encoder.n_cells
+    else:
+        grid_cell_encoder, d_aux = None, None
+
+    ae_model = build_ae(args, d_aux=d_aux)
+    ae_model = load_ae_model(ae_model, os.path.join(checkpoint_dir, weights_name), device=device)
+    return ae_model.to(device), grid_cell_encoder, args
 
 
 def main():
@@ -141,7 +161,6 @@ def main():
     config = vars(args)
     config_path = os.path.join(checkpoint_dir, "config.json")
     with open(config_path, "w") as f:
-        import json
         json.dump(config, f, indent=4)
 
     # data

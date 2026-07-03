@@ -9,8 +9,8 @@
     "n_hidden": 200,
     "in_channels": 512,
     "pool_output_size": [
-        1,
-        1
+        2,
+        2
     ],
     "hidden_dims": [
         512
@@ -22,7 +22,7 @@
     "dropout": 0.0,
     "weight_decay": 0.0,
     "c_factor": 2000.0,
-    "num_epochs": 1000,
+    "num_epochs": 1500,
     "patience": 30,
     "beta": 1.0,
     "arena_size": 1.2,

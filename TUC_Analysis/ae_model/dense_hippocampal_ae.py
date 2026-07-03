@@ -63,13 +63,13 @@ class PooledDenseAE(nn.Module):
     def __init__(
         self,
         n_hidden: int,
+        hidden_dims: Sequence[int],
         in_channels: int = 512,
         pool_output_size: Sequence[int] = (1, 1),
-        hidden_dims: Sequence[int] = (256, 128),
         activation_cls=nn.ReLU,
         dropout: float = 0.0,
         use_layernorm: bool = False,
-        latent_activation: Optional[type] = nn.ReLU,   # class or None; None -> linear bottleneck
+        latent_activation: Optional[nn.Module] = nn.ReLU,   # class or None; None -> linear bottleneck
         last_layer_activation: Optional[nn.Module] = None,  # instance or None; e.g. nn.Sigmoid()
         d_aux: Optional[int] = None,
     ):
@@ -84,8 +84,6 @@ class PooledDenseAE(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(self.pool_output_size)
         self.obs_dim = in_channels * self.pool_output_size[0] * self.pool_output_size[1]
 
-        latent_act = latent_activation() if latent_activation is not None else None
-
         # Encoder consumes pooled features (+ aux), emits latent h
         self.encoder_mlp = MLP(
             input_dim=self.obs_dim + self.d_aux,
@@ -94,7 +92,7 @@ class PooledDenseAE(nn.Module):
             activation_cls=activation_cls,
             dropout=dropout,
             use_layernorm=use_layernorm,
-            output_activation=latent_act,
+            output_activation=latent_activation,
         )
 
         # Decoder mirrors encoder (reversed widths), reconstructs the pooled vector
