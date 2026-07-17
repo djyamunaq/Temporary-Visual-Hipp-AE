@@ -64,3 +64,73 @@ Each notebook (`attention_notebook.ipynb`, `gridcell_notebook.ipynb`) can run th
 
 ---
 
+
+## Analysis
+
+`analysis.py` is a batch exporter that reproduces every figure and quantitative result of `attention_notebook.ipynb` for a whole root of training runs, without opening a notebook. Each run (produced by `main.py`) is discovered by its `config.json`, re-loaded from its checkpoint, evaluated, and written to a mirrored output tree.
+
+### Expected input layout
+
+Point `--data-root` at a folder holding one subfolder per run. Each run contains an experiment-type subfolder with the checkpoint and config:
+
+```
+<data-root>/
+└── <experiment_id>/
+    └── <experiment_type>/            # features_only | features_only_pool1x1
+        ├── config.json
+        ├── best_model.pt             # best_model_aux_input.pt for grid-cell runs
+        ├── loss_history.npy
+        └── grid_encoder.pt           # grid-cell runs only
+```
+
+The same `<experiment_id>/<experiment_type>` nesting is mirrored under `--out-root`. For each run the exporter writes feature-map montages and per-image clusterings, the loss curve, reconstruction figures, spatial ratemaps, an SSCP matrix, place-field statistics and example figures, plus `metrics.json` and `arrays.npz` with the raw arrays.
+
+> Run from inside `TUC_Analysis` so the relative `data_csv` / `feature_model_path` values stored in each `config.json` resolve correctly.
+
+### Usage
+
+```bash
+python analysis.py --data-root path/to/runs --out-root path/to/analysis_outputs
+```
+
+### Arguments
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--data-root` | str | **required** | Root folder with one subfolder per run (`<data-root>/<experiment_id>/<experiment_type>/config.json`). |
+| `--out-root` | str | **required** | Destination for the analysis outputs; the `<experiment_id>/<experiment_type>` nesting is mirrored here. |
+| `--experiment-type` | `features_only` \| `features_only_pool1x1` \| `both` | `both` | Which experiment type (under each `experiment_id`) to analyze. |
+| `--n-featuremap-images` | int | `8` | Number of dataset images used in the shared feature-map / clustering section. |
+| `--device` | str | auto | Torch device (e.g. `cuda`, `cpu`). Defaults to CUDA if available, else CPU. |
+| `--seed` | int | `42` | Random seed for reproducibility. |
+| `--batch-size` | int | `512` | Batch size used during evaluation. |
+| `--num-workers` | int | `0` | DataLoader workers (`0` is safest cross-platform). |
+| `--recon-prob` | float | `0.1` | Per-batch probability of saving a reconstruction figure during eval. |
+| `--data-csv` | str | from config | Override the `data.csv` path stored in each `config.json`. |
+| `--feature-model-path` | str | from config | Override the frozen feature-extractor path stored in each `config.json`. |
+| `--skip-feature-maps` | flag | off | Skip the (expensive) shared feature-map / clustering section. |
+
+### Examples
+
+Analyze only the `features_only` runs on CPU and skip the expensive clustering section:
+
+```bash
+python analysis.py \
+    --data-root path/to/runs \
+    --out-root path/to/analysis_outputs \
+    --experiment-type features_only \
+    --device cpu \
+    --skip-feature-maps
+```
+
+Override the dataset and feature-extractor paths for every run:
+
+```bash
+python analysis.py \
+    --data-root path/to/runs \
+    --out-root path/to/analysis_outputs \
+    --data-csv path/to/data.csv \
+    --feature-model-path ./attention_model/SAM_weights
+```
+
+Each run is processed independently: a failure in one run is logged (with traceback) and does not stop the rest of the batch. The frozen feature extractor and its feature-map section are cached per feature-model path, so shared work is computed once and copied into each mirrored output folder.
