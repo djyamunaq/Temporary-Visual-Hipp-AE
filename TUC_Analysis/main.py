@@ -16,11 +16,12 @@ import os
 import torch
 from torchvision.transforms import v2
 import numpy as np
+import pandas as pd
 import json
 
 from grid_cells.encoder import GridCellEncoder, GridModule, save_grid_encoder, load_grid_encoder
 from ae_model.dense_hippocampal_ae import PooledDenseAE, load_ae_model
-from utils import build_dataloader, WebotsFrameDataset, set_seed, get_parameters, timer
+from utils import build_dataloader, WebotsFrameDataset, set_seed, get_parameters, timer, StratifiedPoseSampler
 from attention_model.conv_encoder import ConvEncoder
 from training_functions import train, train_aux, get_eval_metrics
 
@@ -41,6 +42,14 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--num_workers", type=int, default=12)
     p.add_argument("--seed", type=int, default=None, help="Random seed; None for nondeterministic.")
+
+    # --- subset sampling and eval noise ---
+    p.add_argument("--subset-size", type=float, default=1.0, help="Fraction of the data used for training.")
+    p.add_argument("--subset-seed", type=int, default=0,
+                   help="Kept separate from --seed so all runs share the same nested subsets.")
+    p.add_argument("--xy-bin-size", type=float, default=0.1, help="Spatial bin size for stratification [m].")
+    p.add_argument("--n-angle-bins", type=int, default=8)
+    p.add_argument("--noise-sigma", type=float, default=0.1, help="Gaussian pixel noise std for eval, on [0, 1] scale.")
 
     # --- autoencoder architecture ---
     p.add_argument("--n_hidden", type=int, default=200)
@@ -151,6 +160,7 @@ def main():
     pool_tag = f"pool{args.pool_output_size[0]}x{args.pool_output_size[1]}"
     mode_tag = ("grid" if args.grid_cells else "features_only") + f"_{pool_tag}"
     mode_tag += ("_att" if args.attention else "")
+    mode_tag += f"_subset{args.subset_size}"
     checkpoint_dir = os.path.join(args.checkpoint_base, mode_tag)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -173,6 +183,11 @@ def main():
         v2.Resize((248, 328)),
         v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
+    sampler = StratifiedPoseSampler(xy_bin_size=args.xy_bin_size, n_angle_bins=args.n_angle_bins, seed=args.subset_seed)
+    subset_idx = sampler.select(pd.read_csv(args.data_csv), args.subset_size)
+    np.save(os.path.join(checkpoint_dir, "subset_indices.npy"), subset_idx)
+    print(f"Training subset: {len(subset_idx)} frames")
+
     loader = build_dataloader(
         args.data_csv,
         transform=tf,
@@ -180,7 +195,21 @@ def main():
         shuffle=True,
         num_workers=args.num_workers,
         seed=args.seed,
+        indices=subset_idx,
     )
+
+    # eval on the full dataset (same frames for every subset size); noise before Normalize, on [0, 1] scale
+    tf_noisy = v2.Compose([
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Resize((248, 328)),
+        v2.GaussianNoise(mean=0.0, sigma=args.noise_sigma, clip=True),
+        v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ])
+    eval_loaders = {
+        name: build_dataloader(args.data_csv, transform=t, batch_size=args.batch_size, shuffle=False,
+                               num_workers=args.num_workers, seed=args.seed)
+        for name, t in [("clean", tf), ("noisy", tf_noisy)]
+    }
 
     # frozen feature extractor
     feature_extractor = load_feature_extractor(args.feature_model_path)
@@ -241,19 +270,25 @@ def main():
 
     np.save(os.path.join(checkpoint_dir, "loss_history.npy"), np.asarray(history))
 
-    # eval
-    with timer("Extracting embeddings in: "):
-        embeddings, positions, r2_features = get_eval_metrics(
-            dataloader=loader,
-            ae_model=ae_model,
-            feature_extractor=feature_extractor,
-            grid_cell_encoder=grid_cell_encoder,
-            device=device,
-        )
+    # eval, clean and noisy
+    metrics = {}
+    for name, eval_loader in eval_loaders.items():
+        with timer(f"Extracting embeddings ({name}) in: "):
+            embeddings, positions, r2_features = get_eval_metrics(
+                dataloader=eval_loader,
+                ae_model=ae_model,
+                feature_extractor=feature_extractor,
+                grid_cell_encoder=grid_cell_encoder,
+                save_path=("features" if grid_cell_encoder is None else "features_and_grids") + f"_{name}",
+                device=device,
+            )
 
-    accuracy = np.mean(r2_features)
-    print(f"Embeddings shape: {np.asarray(embeddings).shape}")
-    print(f"Accuracy (pooled-feature reconstruction R2): {accuracy}")
+        metrics[name] = float(np.mean(r2_features))
+        print(f"Embeddings shape ({name}): {np.asarray(embeddings).shape}")
+        print(f"Accuracy ({name}, pooled-feature reconstruction R2): {metrics[name]}")
+
+    with open(os.path.join(checkpoint_dir, "metrics.json"), "w") as f:
+        json.dump(metrics, f, indent=4)
 
 
 if __name__ == "__main__":

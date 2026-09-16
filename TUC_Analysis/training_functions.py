@@ -44,17 +44,19 @@ def train(
             reconstruction_loss, _ = ae_model.training_step(optimizer=optimizer, criterion=criterion, x=features, aux=None, alpha=alpha, C_factor=C_factor)
             running_loss += reconstruction_loss
 
-        with torch.no_grad():
-            A = torch.sigmoid(ae_model.pool.A_raw)
+        A = None
+        if hasattr(ae_model.pool, "A_raw"):  # only the attention pool has A_raw
+            with torch.no_grad():
+                A = torch.sigmoid(ae_model.pool.A_raw)
         if scheduler is not None:
             scheduler.step()
 
         epoch_loss = running_loss / len(loader)
         history.append(epoch_loss)
-        pbar.set_postfix(
-                loss=f'{epoch_loss:.2e}',
-                patience=f'{patience_counter}/{patience}',
-                A=f'{A.min():.2f},{A.mean():.2f},{A.max():.2f}')
+        postfix = dict(loss=f'{epoch_loss:.2e}', patience=f'{patience_counter}/{patience}')
+        if A is not None:
+            postfix["A"] = f'{A.min():.2f},{A.mean():.2f},{A.max():.2f}'
+        pbar.set_postfix(**postfix)
 
         if epoch == 15 or epoch % 50 == 0 and epoch > 0:
             if checkpoint_path is not None:
@@ -159,6 +161,7 @@ def get_eval_metrics(
     device: torch.device,
     grid_cell_encoder: Optional[nn.Module] = None,
     feature_reconstruction_path: Optional[str] = None,
+    save_path: Optional[str] = None,
     prob_plot: float = 0.1
 ):
     from sklearn.metrics import r2_score
@@ -169,7 +172,7 @@ def get_eval_metrics(
         grid_cell_encoder.eval().to(device)
 
     if feature_reconstruction_path is not None:
-        feat_save_dir = Path(feature_reconstruction_path) / "features"
+        feat_save_dir = Path(feature_reconstruction_path) / save_path if save_path is not None else Path(feature_reconstruction_path)
         feat_save_dir.mkdir(parents=True, exist_ok=True)
         if grid_cell_encoder is not None:
             grid_save_dir = Path(feature_reconstruction_path) / "grids"

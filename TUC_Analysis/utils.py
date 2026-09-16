@@ -13,6 +13,11 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.io import read_image, decode_image
 
 from contextlib import contextmanager
+from abc import ABC, abstractmethod
+from typing import Sequence
+
+import numpy as np
+from torch.utils.data import Subset
 import time
 from typing import Optional
 
@@ -61,6 +66,64 @@ def set_seed(seed: Optional[int]):
 def get_parameters(model):
     """Get number of parameters in millions."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
+
+
+# --- subset sampling ----------------------------------------------------------------------
+class SubsetSampler(ABC):
+    """
+    Subclasses rank all samples; a subset of size n is the top n.
+    The ranking must not depend on n, so subsets of increasing size are nested.
+    """
+
+    def __init__(self, seed: int = 0):
+        self.seed = seed
+
+    @abstractmethod
+    def rank(self, df: pd.DataFrame) -> np.ndarray:
+        """Permutation of positional indices into df, highest priority first."""
+
+    def select(
+        self, 
+        df: pd.DataFrame, 
+        size: int | float, 
+        pool: Optional[Sequence[int]] = None
+    ) -> np.ndarray:
+        """size: int = count, float = fraction of pool. Returns positional indices into df."""
+        pool = np.arange(len(df)) if pool is None else np.asarray(pool)
+        n = round(size * len(pool)) if isinstance(size, float) else size
+        return pool[self.rank(df.iloc[pool])[:n]]
+
+
+class StratifiedPoseSampler(SubsetSampler):
+    """
+    Round-robin over occupied (x, y, angle) bins: one random sample per bin, then a second, etc.
+    Every prefix is as balanced across bins as possible; exhausted bins pass their budget on.
+    Angle bins are circular and centred on 0°, so corridor-aligned headings don't straddle an edge.
+    """
+
+    def __init__(self, xy_bin_size: float, n_angle_bins: int = 8, seed: int = 0,
+                 x_col: str = "X", y_col: str = "Y", z_col: str = "Z"):
+        super().__init__(seed)
+        self.xy_bin_size = xy_bin_size
+        self.n_angle_bins = n_angle_bins
+        self.cols = [x_col, y_col, z_col]
+
+    def bins(self, df: pd.DataFrame) -> np.ndarray:
+        x, y, z = (df[c].to_numpy(dtype=float) for c in self.cols)
+        width = 360 / self.n_angle_bins
+        keys = np.column_stack([
+            np.floor((x - x.min()) / self.xy_bin_size),
+            np.floor((y - y.min()) / self.xy_bin_size),
+            np.floor(((z + width / 2) % 360) / width) % self.n_angle_bins,
+        ])
+        return np.unique(keys, axis=0, return_inverse=True)[1].ravel()
+
+    def rank(self, df: pd.DataFrame) -> np.ndarray:
+        rng = np.random.default_rng(self.seed)
+        perm = rng.permutation(len(df))
+        b = self.bins(df)[perm]
+        round_ = pd.Series(b).groupby(b).cumcount().to_numpy()  # k-th draw from its bin
+        return perm[np.lexsort((rng.random(len(df)), round_))]  # by round, random bin order within
 
 
 # --- dataset and dataloader for Webots frames ----------------------------------------------
@@ -140,10 +203,13 @@ def build_dataloader(
     shuffle: bool = True,
     num_workers: int = 4,
     seed: Optional[int] = None,
+    indices: Optional[Sequence[int]] = None,
     **dataset_kwargs,
 ) -> DataLoader:
 
     dataset = WebotsFrameDataset(data_csv, transform=transform, **dataset_kwargs)
+    if indices is not None:
+        dataset = Subset(dataset, list(indices))
     
     generator = None
     if seed is not None:
@@ -164,13 +230,22 @@ def build_dataloader(
 if __name__ == "__main__":
     from torchvision.transforms import v2
 
+
     norm = v2.Compose([
         v2.ToDtype(torch.float32, scale=True),
+        v2.GaussianNoise(mean=0.0, sigma=0.1, clip=True),
         v2.Normalize(mean=[0.485, 0.456, 0.406],
                      std=[0.229, 0.224, 0.225]),
     ])
 
-    loader = build_dataloader("../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv", transform=norm, batch_size=12)
+    csv = "../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv"
+
+    # nested subsets for a data-efficiency sweep; pass pool=train_idx to sample within the train split
+    sampler = StratifiedPoseSampler(xy_bin_size=0.25, n_angle_bins=8, seed=0)
+    subsets = {size: sampler.select(pd.read_csv(csv), size) for size in [0.1, 0.25, 0.5, 1.0]}
+
+    loader = build_dataloader(csv, transform=norm, batch_size=12, indices=subsets[0.5])
     images, xy = next(iter(loader))
+    print(len(loader.dataset), len(loader.dataset.indices))
     print(images.shape, images.dtype)
     print(xy.shape, xy.dtype)
