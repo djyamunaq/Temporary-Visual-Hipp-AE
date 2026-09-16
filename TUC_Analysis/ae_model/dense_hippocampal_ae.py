@@ -42,6 +42,21 @@ class MLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
 
+class AttentionMechanism(nn.Module):
+    def __init__(self, pooling_size, in_channels):
+        super().__init__()
+        self.theta = 0.1
+        self.sigma = 0.8
+        self.g = (6+self.sigma)/6
+        self.pooling_size = pooling_size
+        self.A_raw = nn.Parameter((torch.rand(1, in_channels, 1, 1)-.75) * 4)
+
+    def forward(self, x):
+        A = torch.sigmoid(self.A_raw)
+        S = x.mean(axis=(2,3), keepdims=True)
+        attended = self.g * x * (1 + A)/(self.sigma + x * (1 + A + S)) - self.theta
+        return torch.relu(F.adaptive_avg_pool2d(attended, self.pooling_size))
+
 
 class PooledDenseAE(nn.Module):
     """
@@ -72,6 +87,7 @@ class PooledDenseAE(nn.Module):
         latent_activation: Optional[nn.Module] = nn.ReLU,   # class or None; None -> linear bottleneck
         last_layer_activation: Optional[nn.Module] = None,  # instance or None; e.g. nn.Sigmoid()
         d_aux: Optional[int] = None,
+        use_attention: bool = False,
     ):
         super().__init__()
         self.n_hidden = n_hidden
@@ -79,9 +95,13 @@ class PooledDenseAE(nn.Module):
         self.pool_output_size = tuple(pool_output_size)
         self.d_aux = d_aux if d_aux is not None else 0
         self.last_layer_activation = last_layer_activation
+        self.use_attention = use_attention
 
         # swappable pooling, output is flattened anyway.
-        self.pool = nn.AdaptiveAvgPool2d(self.pool_output_size)
+        if self.use_attention:
+            self.pool = AttentionMechanism(self.pool_output_size, in_channels)
+        else:
+            self.pool = nn.AdaptiveAvgPool2d(self.pool_output_size)
         self.obs_dim = in_channels * self.pool_output_size[0] * self.pool_output_size[1]
 
         # Encoder consumes pooled features (+ aux), emits latent h
@@ -141,6 +161,7 @@ class PooledDenseAE(nn.Module):
         C_factor: float = 1.0,
         alpha: float = 0,
         beta: float = 1.0,
+        gamma: float = 0.8,
     ):
         optimizer.zero_grad()
         x_recon, aux_recon, hidden = self.forward(x, aux)
@@ -161,7 +182,12 @@ class PooledDenseAE(nn.Module):
             C = C_factor * torch.eye(D, device=hidden.device) - M
             constraint_loss = alpha * torch.norm(C) / (B * D)
 
-        (recon_loss + beta * aux_loss + constraint_loss).backward()
+        if isinstance(self.pool, AttentionMechanism):
+            sparseness = gamma * torch.sigmoid(self.pool.A_raw).sum()
+        else:
+            sparseness = x.new_tensor(0.)
+
+        (recon_loss + beta * aux_loss + constraint_loss + sparseness).backward()
         optimizer.step()
         return recon_loss.item(), aux_loss.item()
 
@@ -171,4 +197,3 @@ def load_ae_model(ae_model: nn.Module, full_checkpoint_path: str, device: torch.
     ae_model.load_state_dict(state_dict)
     ae_model.eval()
     return ae_model
-

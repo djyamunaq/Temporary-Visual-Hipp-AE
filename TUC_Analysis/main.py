@@ -30,6 +30,8 @@ def parse_args():
 
     p.add_argument("--grid-cells", action="store_true",
                    help="Use the grid-cell auxiliary target (sets d_aux and beta).")
+    p.add_argument("--attention", action="store_true",
+                   help="Use the attention mechanism.")
 
     p.add_argument("--data-csv", default="../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv")
     p.add_argument("--feature-model-path", default="./attention_model/SAM_weights/")
@@ -117,11 +119,12 @@ def build_ae(args, d_aux):
         pool_output_size=tuple(args.pool_output_size),
         hidden_dims=args.hidden_dims,
         latent_activation=torch.nn.ReLU(),
-        last_layer_activation=torch.nn.Sigmoid(),  # pooled target stays in [0, 1]
+        last_layer_activation=torch.nn.ReLU(),  # pooled target stays >= 0
         d_aux=d_aux,
         dropout=args.dropout,
+        use_attention=args.attention,
     )
-    
+
 
 def build_model_from_config(checkpoint_dir, device, weights_name="best_model.pt"):
     args = load_run_config(checkpoint_dir)
@@ -147,6 +150,7 @@ def main():
     # each other's best_model.pt. Drop pool_tag to restore the old flat layout.
     pool_tag = f"pool{args.pool_output_size[0]}x{args.pool_output_size[1]}"
     mode_tag = ("grid" if args.grid_cells else "features_only") + f"_{pool_tag}"
+    mode_tag += ("_att" if args.attention else "")
     checkpoint_dir = os.path.join(args.checkpoint_base, mode_tag)
     os.makedirs(checkpoint_dir, exist_ok=True)
 

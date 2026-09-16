@@ -8,12 +8,12 @@ import numpy as np
 
 
 def train(
-    ae_model: nn.Module, 
-    feature_extractor: nn.Module, 
-    loader: torch.utils.data.DataLoader, 
-    optimizer: torch.optim.Optimizer, 
-    criterion: nn.Module, 
-    alpha: float, 
+    ae_model: nn.Module,
+    feature_extractor: nn.Module,
+    loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    alpha: float,
     C_factor: float,
     device: torch.device,
     num_epochs: int,
@@ -23,10 +23,10 @@ def train(
 ):
     if checkpoint_path is not None:
         os.makedirs(checkpoint_path, exist_ok=True)
-    
+
     best_loss = float('inf')
     patience_counter = 0
-    history = []    
+    history = []
 
     ae_model.train()
     ae_model.to(device)
@@ -36,20 +36,30 @@ def train(
     pbar = tqdm(range(num_epochs))
     for epoch in pbar:
         running_loss = 0.
-        for i, data in enumerate(loader):            
-            inputs, _ = data 
+        for i, data in enumerate(loader):
+            inputs, _ = data
             inputs = inputs.to(device)
             with torch.no_grad():
                 features = feature_extractor(inputs)
             reconstruction_loss, _ = ae_model.training_step(optimizer=optimizer, criterion=criterion, x=features, aux=None, alpha=alpha, C_factor=C_factor)
             running_loss += reconstruction_loss
 
+        with torch.no_grad():
+            A = torch.sigmoid(ae_model.pool.A_raw)
         if scheduler is not None:
             scheduler.step()
 
         epoch_loss = running_loss / len(loader)
         history.append(epoch_loss)
-        pbar.set_postfix(loss=f'{epoch_loss:.4f}', patience=f'{patience_counter}/{patience}')
+        pbar.set_postfix(
+                loss=f'{epoch_loss:.2e}',
+                patience=f'{patience_counter}/{patience}',
+                A=f'{A.min():.2f},{A.mean():.2f},{A.max():.2f}')
+
+        if epoch == 15 or epoch % 50 == 0 and epoch > 0:
+            if checkpoint_path is not None:
+                torch.save(ae_model.state_dict(), os.path.join(checkpoint_path, f'model_{epoch}.pt'))
+                torch.save(feature_extractor.state_dict(), os.path.join(checkpoint_path, f'feat_{epoch}.pt'))
 
         # Checkpoint best model
         if epoch_loss < best_loss:
@@ -70,13 +80,13 @@ def train(
 
 # grid cell encoder training function
 def train_aux(
-    ae_model: nn.Module, 
+    ae_model: nn.Module,
     feature_extractor: nn.Module,
-    grid_cell_encoder: nn.Module, 
-    loader: torch.utils.data.DataLoader, 
-    optimizer: torch.optim.Optimizer, 
-    criterion: nn.Module, 
-    alpha: float, 
+    grid_cell_encoder: nn.Module,
+    loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    alpha: float,
     C_factor: float,
     beta: float,
     device: torch.device,
@@ -87,10 +97,10 @@ def train_aux(
 ):
     if checkpoint_path is not None:
         os.makedirs(checkpoint_path, exist_ok=True)
-    
+
     best_loss = float('inf')
     patience_counter = 0
-    history = []    
+    history = []
 
     ae_model.train()
     ae_model.to(device)
@@ -103,10 +113,10 @@ def train_aux(
     pbar = tqdm(range(num_epochs))
     for epoch in pbar:
         running_loss = 0.
-        for i, data in enumerate(loader):            
-            inputs, xy = data 
-            inputs = inputs.to(device); xy = xy.to(device)
-            
+        for i, data in enumerate(loader):
+            inputs, xy = data
+            inputs, xy = inputs.to(device), xy.to(device)
+
             with torch.no_grad():
                 features = feature_extractor(inputs)
                 grid_cell_input = grid_cell_encoder(xy)
@@ -120,6 +130,10 @@ def train_aux(
         epoch_loss = running_loss / len(loader)
         history.append(epoch_loss)
         pbar.set_postfix(loss=f'{epoch_loss:.4f}', patience=f'{patience_counter}/{patience}')
+
+        if epoch == 15 or epoch % 50 == 0 and epoch > 0:
+            if checkpoint_path is not None:
+                torch.save(ae_model.state_dict(), os.path.join(checkpoint_path, f'model_{epoch}.pt'))
 
         # Checkpoint best model
         if epoch_loss < best_loss:
@@ -168,7 +182,7 @@ def get_eval_metrics(
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
             image, xy = batch
-            image = image.to(device); xy = xy.to(device)
+            image, xy = image.to(device), xy.to(device)
 
             grid_cell_input = grid_cell_encoder(xy) if grid_cell_encoder is not None else None
             features = feature_extractor(image)
@@ -209,7 +223,7 @@ def get_eval_metrics(
         np.concatenate(positions, axis=0),
         np.array(r2_scores)
     )
-    
+
 
 def _save_comparison_figure(
     original: np.ndarray,
@@ -218,7 +232,7 @@ def _save_comparison_figure(
     title: str = "",
     image: Optional[np.ndarray] = None,
     n_samples: int = 4,
-):  
+):
     """
     Handles two input shapes:
       - (B, C, H, W): mean over C → imshow (H, W) heatmap
@@ -251,7 +265,7 @@ def _save_comparison_figure(
         if is_spatial:
             orig_plot = orig_i.mean(axis=0)
             rec_plot  = rec_i.mean(axis=0)
-            
+
             axes[0, i].imshow(orig_plot, cmap='viridis', aspect='auto', vmin=orig_plot.min(), vmax=orig_plot.max())
             axes[1, i].imshow(rec_plot,  cmap='viridis', aspect='auto', vmin=rec_plot.min(), vmax=rec_plot.max())
             for ax in axes[:2, i]:
