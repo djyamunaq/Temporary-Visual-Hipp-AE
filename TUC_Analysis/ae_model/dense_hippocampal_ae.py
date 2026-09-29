@@ -92,6 +92,7 @@ class PooledDenseAE(nn.Module):
         super().__init__()
         self.n_hidden = n_hidden
         self.in_channels = in_channels
+        self.sqrtn = np.sqrt(in_channels)
         self.pool_output_size = tuple(pool_output_size)
         self.d_aux = d_aux if d_aux is not None else 0
         self.last_layer_activation = last_layer_activation
@@ -183,7 +184,12 @@ class PooledDenseAE(nn.Module):
             constraint_loss = alpha * torch.norm(C) / (B * D)
 
         if isinstance(self.pool, AttentionMechanism):
+            # Basic sparseness
             sparseness = gamma * torch.sigmoid(self.pool.A_raw).sum()
+
+            # Hoyer sparseness
+            # A = torch.sigmoid(self.pool.A_raw)
+            # sparseness = (self.sqrtn - A.sum()/torch.sqrt((A**2).sum()))/(self.sqrtn - 1)
         else:
             sparseness = x.new_tensor(0.)
 
