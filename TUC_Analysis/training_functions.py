@@ -164,7 +164,6 @@ def get_eval_metrics(
     save_path: Optional[str] = None,
     prob_plot: float = 0.1
 ):
-    from sklearn.metrics import r2_score
 
     ae_model.eval().to(device)
     feature_extractor.eval().to(device)
@@ -180,7 +179,7 @@ def get_eval_metrics(
 
     latent_vectors = []
     positions = []
-    r2_scores = []
+    sse, target_sum, target_sq_sum, n = 0.0, 0.0, 0.0, 0
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -194,13 +193,12 @@ def get_eval_metrics(
             features_np     = ae_model.pool_flatten(features).cpu().numpy()
             rec_features_np = rec_features.cpu().numpy()
 
-            # R2 per sample: flatten (C, H, W) - (D,) per sample, then average over batch
-            r2_batch = r2_score(
-                features_np.reshape(len(features_np), -1),
-                rec_features_np.reshape(len(rec_features_np), -1),
-                multioutput='uniform_average'
-            )
-            r2_scores.append(r2_batch)
+            target = features_np.reshape(len(features_np), -1).astype(np.float64)
+            rec = rec_features_np.reshape(len(rec_features_np), -1).astype(np.float64)
+            sse += ((rec - target) ** 2).sum()
+            target_sum = target_sum + target.sum(axis=0)
+            target_sq_sum = target_sq_sum + (target ** 2).sum(axis=0)
+            n += len(target)
 
             latent_vectors.append(h.cpu().numpy())
             positions.append(xy.cpu().numpy())
@@ -221,10 +219,12 @@ def get_eval_metrics(
                         title="Grid reconstruction"
                     )
 
+    r2 = 1 - sse / (target_sq_sum - target_sum ** 2 / n).sum()
+
     return (
         np.concatenate(latent_vectors, axis=0),
         np.concatenate(positions, axis=0),
-        np.array(r2_scores)
+        r2
     )
 
 

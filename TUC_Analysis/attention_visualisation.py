@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 
-CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool2x2_att/"
+CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool2x2_att_subset0.5/"
 class Decoder(nn.Module):
     def __init__(self, latent_dim: int, output_dim: Sequence[int]):
         ######
@@ -43,11 +43,10 @@ class Decoder(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.2),
             # increase the spatial size by two again to get final resolution
-            nn.ConvTranspose2d(64, 128, kernel_size=3, stride=2, padding=1, output_padding=0),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=0),  # was 128
             nn.ReLU(),
             # output layer maps to a 3-channel RGB image
-            nn.ConvTranspose2d(128, 3, kernel_size=3),
-            nn.Sigmoid(),
+            nn.ConvTranspose2d(32, 3, kernel_size=3),
         )
 
 
@@ -63,7 +62,7 @@ class Decoder(nn.Module):
         return loss
 
 
-def train(decoder, device, feature_extractor, epochs=50):
+def train(decoder, device, feature_extractor, epochs=50, batch_size=256):
     """ Train the decoder with batches from the unattented encoder. """
     optimizer = torch.optim.Adam(decoder.parameters(), lr=0.0001)
     criterion = nn.MSELoss()
@@ -75,7 +74,7 @@ def train(decoder, device, feature_extractor, epochs=50):
     loader = build_dataloader(
         "../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv",
         transform=tf,
-        batch_size=256,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=4,
         seed=None,
@@ -97,7 +96,7 @@ def train(decoder, device, feature_extractor, epochs=50):
                 x = ae_model.encoder(features)
             # x = torch.stack([latent[i//512][i%512] for i in idx]).to(device)
             loss += decoder.training_step(optimizer, criterion, x=x, yb=inp)
-        epoch_loss.append(loss / len(loader))
+        epoch_loss.append(loss.item() / len(loader))
         pbar.set_postfix(loss=f'{epoch_loss[-1]:.4f}')
         torch.save({
             "epoch": epoch,
@@ -108,7 +107,7 @@ def train(decoder, device, feature_extractor, epochs=50):
     return epoch_loss
 
 
-def get_encoder_activity(device, feature_extractor, load=False):
+def get_encoder_activity(device, feature_extractor, load=False, batch_size=128):
     """ Encode the full dataset on the encoder with and without attention"""
     tf = v2.Compose([
         v2.ToDtype(torch.float32, scale=True),
@@ -118,7 +117,7 @@ def get_encoder_activity(device, feature_extractor, load=False):
     loader = build_dataloader(
         "../Denis/HIP_AE_VISUAL/Datasets/Tmaze_2/data.csv",
         transform=tf,
-        batch_size=256,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=12,
         seed=None,
@@ -147,7 +146,7 @@ def get_encoder_activity(device, feature_extractor, load=False):
     return latent_space, latent_space_att, loader
 
 
-def run(train_decoder=False):
+def run(train_decoder=False, batch_size=128, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
     """ Main Function. Encode, Train and Plot. """
     n_cells = 200
     output_dim = (128, 248, 328)
@@ -155,8 +154,6 @@ def run(train_decoder=False):
 
     if not os.path.exists(f'{CHECKPOINT_PATH}/decoderimg/'):
         os.mkdir(f'{CHECKPOINT_PATH}/decoderimg/')
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     feature_extr = load_feature_extractor("./attention_model/SAM_weights/")
     feature_extr = feature_extr.to(device)
@@ -169,7 +166,7 @@ def run(train_decoder=False):
         decoder_model = Decoder(n_cells, output_dim)
         decoder_model = decoder_model.to(device)
         print("Training decoder for image reconstruction")
-        losstrace = train(decoder_model, device, feature_extr, epochs=200)
+        losstrace = train(decoder_model, device, feature_extr, epochs=200, batch_size=batch_size)
 
         # Save the weights
         torch.save(decoder_model, f'{CHECKPOINT_PATH}/decoder_model.pt')
@@ -183,7 +180,7 @@ def run(train_decoder=False):
 
     ## Generate cell responses taken with and without attention
     # Load encoded features if possible
-    lat, lat_att, dataloader = get_encoder_activity(device, feature_extr, True)
+    lat, lat_att, dataloader = get_encoder_activity(device, feature_extr, True, batch_size=batch_size)
 
     n_samples_total = (len(lat) - 1) * len(lat[0]) + len(lat[-1])
     n_samples = 8
@@ -201,12 +198,18 @@ def run(train_decoder=False):
     ln = torch.stack((*lat[0][idx], *lat_att[0][idx]))
     with torch.no_grad():
         FE_out = to_image_shape(feature_extr(views))
+        decoder_model.eval()
         pred = decoder_model(ln)
 
-    pred, pred_att = to_image_shape(pred[:n_samples]), to_image_shape(pred[n_samples:])
-    views = (to_image_shape(views) * [0.229, 0.224, 0.225]) + [0.485, 0.456, 0.406]
-    views = (views * 255).astype('uint8')
+    mean = np.array([0.485, 0.456, 0.406])
+    std  = np.array([0.229, 0.224, 0.225])
 
+    pred, pred_att = to_image_shape(pred[:n_samples]), to_image_shape(pred[n_samples:])
+    pred     = np.clip(pred * std + mean, 0, 1)
+    pred_att = np.clip(pred_att * std + mean, 0, 1)
+
+    views = to_image_shape(views) * std + mean
+    
     fig, axs = plt.subplots(n_samples, 4,  figsize=(8,12))
     titles = ['Scene', 'No attention', 'Full attention' , 'Feat Extractor out']
 
@@ -224,4 +227,15 @@ def run(train_decoder=False):
     print(f"Saved image at {CHECKPOINT_PATH}")
 
 if __name__ == "__main__":
-    run()
+    import argparse
+    args = argparse.ArgumentParser()
+    args.add_argument("--train-decoder", action="store_true", help="Train the decoder model for image reconstruction")
+    args.add_argument("--batch-size", type=int, default=128, help="Batch size for encoding and training")
+    args.add_argument("--device", type=str, default="cuda", help="Device to use for computation (cuda or cpu)")
+    args = args.parse_args()
+    train_decoder = args.train_decoder
+    batch_size = args.batch_size
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+
+    run(train_decoder, batch_size=batch_size, device=device)
+

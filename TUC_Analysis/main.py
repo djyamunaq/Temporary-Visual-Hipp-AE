@@ -72,7 +72,7 @@ def parse_args():
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--c_factor", type=float, default=1000.0)
     p.add_argument("--num_epochs", type=int, default=1000)
-    p.add_argument("--patience", type=int, default=10)
+    p.add_argument("--patience", type=int, default=None)
 
     p.add_argument("--beta", type=float, default=1.0,
                    help="Weight of the grid-cell reconstruction loss; "
@@ -279,7 +279,7 @@ def main():
                 ae_model=ae_model,
                 feature_extractor=feature_extractor,
                 grid_cell_encoder=grid_cell_encoder,
-                save_path=("features" if grid_cell_encoder is None else "features_and_grids") + f"_{name}",
+                save_path=os.path.join(checkpoint_dir, f"{name}"),
                 device=device,
             )
 
