@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 
-CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool2x2_att_subset0.5/"
+CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool2x2_att_subset1.0/"
 class Decoder(nn.Module):
     def __init__(self, latent_dim: int, output_dim: Sequence[int]):
         ######
@@ -28,13 +28,13 @@ class Decoder(nn.Module):
         c, w, h = output_dim # 2 spatial dimension (w x h) and the feature-map/channel dimension
         w = int(w/4)
         h = int(h/4)
-        d = 25 # should be half of number feature maps, as features are encoded very sparsely
+        d = 100 # should be half of number feature maps, as features are encoded very sparsely
 
         self.decoder = nn.Sequential(
             # first dense layer after input
-            nn.Linear(latent_dim, 1024),
+            nn.Linear(latent_dim, 128),
             nn.ReLU(),
-            nn.Linear(1024, d*w*h),
+            nn.Linear(128, d*w*h),
             nn.ReLU(),
             nn.Unflatten(1, (d, w, h)),
             nn.Dropout(0.2),

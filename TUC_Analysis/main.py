@@ -153,7 +153,7 @@ def main():
     args = parse_args()
 
     set_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # pool size is part of the tag so different pooling configs don't overwrite
     # each other's best_model.pt. Drop pool_tag to restore the old flat layout.

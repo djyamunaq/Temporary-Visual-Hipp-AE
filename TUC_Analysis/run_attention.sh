@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Data-efficiency sweep: subset sizes x {no attention, attention} for a fixed pooling size.
+# Data-efficiency sweep: pooling sizes x subset sizes x {no attention, attention}.
 # A run is skipped if its metrics.json exists (main.py writes it last, so it marks a finished run);
 # re-running the script after a crash therefore only redoes what is missing.
 # Extra arguments are passed to main.py, e.g. ./run_attention.sh --grid-cells --noise-sigma 0.2
 set -euo pipefail
 
-POOL_H=1
-POOL_W=1
+POOLS=("1 1" "2 2")            # "H W" pairs for --pool-output-size
 SIZES=(0.05 0.1 0.25 0.5 1.0)
 SEED=0
 LOG_DIR=./logs
@@ -20,25 +19,30 @@ for a in "$@"; do
     if [[ "$a" == "--grid-cells" ]]; then mode="grid"; fi
 done
 
-pool_tag="pool${POOL_H}x${POOL_W}"
 log_prefix=""
 if [[ "$mode" == "grid" ]]; then log_prefix="grid_"; fi   # keep --grid-cells logs from overwriting features-only logs
 
-for size in "${SIZES[@]}"; do
-    for att in "" "--attention"; do
-        name="${log_prefix}${pool_tag}_subset${size}${att:+_att}"     # log name (pool tag avoids clobbering the 1x1 logs)
-        run_dir="${CKPT_BASE}/${mode}_${pool_tag}${att:+_att}_subset${size}"   # mirrors main.py's checkpoint_dir
+for pool in "${POOLS[@]}"; do
+    read -r pool_h pool_w <<< "$pool"
+    pool_tag="pool${pool_h}x${pool_w}"
 
-        if [[ -f "$run_dir/metrics.json" ]]; then
-            echo "=== $name: already done, skipping ==="
-            continue
-        fi
+    for size in "${SIZES[@]}"; do
+        for att in "" "--attention"; do
+            name="${log_prefix}${pool_tag}_subset${size}${att:+_att}"
+            run_dir="${CKPT_BASE}/${mode}_${pool_tag}${att:+_att}_subset${size}"
 
-        echo "=== $name ==="
-        python main.py \
-            --subset-size "$size" --seed "$SEED" \
-            --pool-output-size "$POOL_H" "$POOL_W" \
-            --checkpoint-base "$CKPT_BASE/" \
-            $att "$@" 2>&1 | tee "$LOG_DIR/$name.log"
+            if [[ -f "$run_dir/metrics.json" ]]; then
+                echo "=== $name: already done, skipping ==="
+                continue
+            fi
+
+            echo "=== $name ==="
+            python main.py \
+                --subset-size "$size" --seed "$SEED" \
+                --pool-output-size "$pool_h" "$pool_w" \
+                --checkpoint-base "$CKPT_BASE/" \
+                --n_hidden 100 \
+                $att "$@" 2>&1 | tee "$LOG_DIR/$name.log"
+        done
     done
 done
