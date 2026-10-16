@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 
-CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool2x2_att_subset1.0/"
+CHECKPOINT_PATH = "./ae_model/feature_extractor_ae_checkpoint/features_only_pool1x1_subset1.0/"
 class Decoder(nn.Module):
     def __init__(self, latent_dim: int, output_dim: Sequence[int]):
         ######
@@ -146,9 +146,8 @@ def get_encoder_activity(device, feature_extractor, load=False, batch_size=128):
     return latent_space, latent_space_att, loader
 
 
-def run(train_decoder=False, batch_size=128, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+def run(train_decoder=False, batch_size=128, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"), n_hidden=100):
     """ Main Function. Encode, Train and Plot. """
-    n_cells = 200
     output_dim = (128, 248, 328)
     # output_dim = (128, 31, 41)
 
@@ -163,7 +162,7 @@ def run(train_decoder=False, batch_size=128, device=torch.device("cuda" if torch
     ## Create or Load a decoder model
     if train_decoder:
         # Train new decoder
-        decoder_model = Decoder(n_cells, output_dim)
+        decoder_model = Decoder(n_hidden, output_dim)
         decoder_model = decoder_model.to(device)
         print("Training decoder for image reconstruction")
         losstrace = train(decoder_model, device, feature_extr, epochs=200, batch_size=batch_size)
@@ -232,10 +231,14 @@ if __name__ == "__main__":
     args.add_argument("--train-decoder", action="store_true", help="Train the decoder model for image reconstruction")
     args.add_argument("--batch-size", type=int, default=128, help="Batch size for encoding and training")
     args.add_argument("--device", type=str, default="cuda", help="Device to use for computation (cuda or cpu)")
+    args.add_argument("--checkpoint-path", type=str, default=CHECKPOINT_PATH, help="Checkpoint directory of the autoencoder (also where decoder outputs are written)")
+    args.add_argument("--n-hidden", type=int, default=100, help="Bottleneck size (latent_dim of the decoder). Must match the encoder in the checkpoint")
     args = args.parse_args()
+
+    CHECKPOINT_PATH = args.checkpoint_path
+    
     train_decoder = args.train_decoder
     batch_size = args.batch_size
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    run(train_decoder, batch_size=batch_size, device=device)
-
+    run(train_decoder, batch_size=batch_size, device=device, n_hidden=args.n_hidden)

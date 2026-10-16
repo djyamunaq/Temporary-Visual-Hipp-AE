@@ -162,7 +162,8 @@ def get_eval_metrics(
     grid_cell_encoder: Optional[nn.Module] = None,
     feature_reconstruction_path: Optional[str] = None,
     save_path: Optional[str] = None,
-    prob_plot: float = 0.1
+    prob_plot: float = 0.1,
+    return_inputs: bool = False,
 ):
 
     ae_model.eval().to(device)
@@ -179,6 +180,7 @@ def get_eval_metrics(
 
     latent_vectors = []
     positions = []
+    inputs = []
     sse, target_sum, target_sq_sum, n = 0.0, 0.0, 0.0, 0
 
     with torch.no_grad():
@@ -202,6 +204,8 @@ def get_eval_metrics(
 
             latent_vectors.append(h.cpu().numpy())
             positions.append(xy.cpu().numpy())
+            if return_inputs:
+                inputs.append(features_np)
 
             if feature_reconstruction_path is not None and np.random.rand() < prob_plot:
                 _save_comparison_figure(
@@ -221,11 +225,10 @@ def get_eval_metrics(
 
     r2 = 1 - sse / (target_sq_sum - target_sum ** 2 / n).sum()
 
-    return (
-        np.concatenate(latent_vectors, axis=0),
-        np.concatenate(positions, axis=0),
-        r2
-    )
+    outputs = (np.concatenate(latent_vectors, axis=0), np.concatenate(positions, axis=0), r2)
+    if return_inputs:
+        outputs += (np.concatenate(inputs, axis=0),)
+    return outputs
 
 
 def _save_comparison_figure(

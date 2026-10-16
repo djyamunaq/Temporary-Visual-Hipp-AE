@@ -45,7 +45,7 @@ class MLP(nn.Module):
 class AttentionMechanism(nn.Module):
     def __init__(self, pooling_size, in_channels):
         super().__init__()
-        self.theta = 0.1
+        self.theta = 0.0
         self.sigma = 0.8
         self.g = (6+self.sigma)/6
         self.pooling_size = pooling_size

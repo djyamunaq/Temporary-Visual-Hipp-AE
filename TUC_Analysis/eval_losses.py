@@ -78,8 +78,8 @@ def summary_text(df):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--checkpoint-base", default="./ae_model/feature_extractor_ae_checkpoint/")
-    p.add_argument("--out-dir", default="./eval_results")
+    p.add_argument("--checkpoint-base", default="./ae_model/feature_extractor_ae_checkpoint_n128/")
+    p.add_argument("--out-dir", default="./eval_results_n128/")
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)

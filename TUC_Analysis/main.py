@@ -40,7 +40,7 @@ def parse_args():
                    help="Base dir; a mode + pooling subdir is appended.")
 
     p.add_argument("--batch-size", type=int, default=512)
-    p.add_argument("--num_workers", type=int, default=12)
+    p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--seed", type=int, default=None, help="Random seed; None for nondeterministic.")
 
     # --- subset sampling and eval noise ---

@@ -8,8 +8,8 @@ set -euo pipefail
 POOLS=("1 1" "2 2")            # "H W" pairs for --pool-output-size
 SIZES=(0.05 0.1 0.25 0.5 1.0)
 SEED=0
-LOG_DIR=./logs
-CKPT_BASE=./ae_model/feature_extractor_ae_checkpoint   # passed to main.py, so skip check and run agree
+LOG_DIR=./logs_new
+CKPT_BASE=./ae_model/feature_extractor_ae_checkpoint_n128/   # passed to main.py, so skip check and run agree
 
 mkdir -p "$LOG_DIR"
 
@@ -41,7 +41,8 @@ for pool in "${POOLS[@]}"; do
                 --subset-size "$size" --seed "$SEED" \
                 --pool-output-size "$pool_h" "$pool_w" \
                 --checkpoint-base "$CKPT_BASE/" \
-                --n_hidden 100 \
+                --n_hidden 128 \
+                --seed 0 \
                 $att "$@" 2>&1 | tee "$LOG_DIR/$name.log"
         done
     done

@@ -14,9 +14,9 @@ from torchvision.transforms import v2
 from utils import build_dataloader, set_seed
 from main import load_feature_extractor
 
-POOLS = ((1, 1), (2, 1), (1, 2), (2, 2), (2, 3), (3, 3), (4, 4), (5, 5), (6, 6))
+POOLS = ((1, 1), (2, 1), (1, 2), (2, 2), (2, 3), (3, 2), (3, 3), (3, 4), (4, 3), (4, 4), )
 ALPHA_GRID = np.logspace(-10, 3, 27)
-INSPECT = (6, 6)  # pool whose worst-decoded frames get plotted
+INSPECT = (2, 2)  # pool whose worst-decoded frames get plotted
 # transform normalisation
 MEAN, STD = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
 
